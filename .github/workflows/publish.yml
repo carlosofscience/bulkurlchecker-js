@@ -31,7 +31,7 @@ jobs:
       id-token: write   # OIDC for npm trusted publishing + sigstore provenance
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Node 20
         uses: actions/setup-node@v4
