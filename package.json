@@ -1,0 +1,57 @@
+{
+  "name": "bulkurlchecker",
+  "version": "0.1.0",
+  "description": "JavaScript/TypeScript client for the Bulk URL Checker API. Skip the proxy-rotation + rate-limiter + soft-404-detector you would otherwise have to build.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE", "CHANGELOG.md"],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean --target node18",
+    "lint": "eslint src tests --ext .ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "url-checker",
+    "bulk-url-checker",
+    "broken-link-checker",
+    "http-status-checker",
+    "seo-tools",
+    "link-validator",
+    "url-validation",
+    "redirect-checker"
+  ],
+  "author": "Bulk URL Checker <carlos@bulkurlchecker.com>",
+  "license": "MIT",
+  "homepage": "https://bulkurlchecker.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/carlosofscience/bulkurlchecker-js.git"
+  },
+  "bugs": {
+    "url": "https://github.com/carlosofscience/bulkurlchecker-js/issues"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^1.0.0"
+  }
+}
