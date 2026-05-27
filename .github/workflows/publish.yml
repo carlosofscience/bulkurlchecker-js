@@ -1,20 +1,12 @@
 name: Publish to npm
 
+# BOOTSTRAP MODE: uses NPM_TOKEN to land the first publish of
+# `bulkurlchecker` so we can configure npm Trusted Publishers
+# (which requires the package to already exist). Once that's
+# done, this workflow will be swapped back to pure OIDC and
+# the NPM_TOKEN secret removed.
+#
 # Triggered by pushing a version tag (e.g. v0.1.0).
-#
-# Uses npm Trusted Publishers (OIDC) -- no NPM_TOKEN required.
-# Configure on npmjs.com side at
-# https://www.npmjs.com/package/bulkurlchecker/access (after the
-# package exists) or via the pre-publish trusted publisher form:
-#   Package:     bulkurlchecker
-#   Owner:       carlosofscience
-#   Repo:        bulkurlchecker-js
-#   Workflow:    publish.yml
-#   Environment: npm
-#
-# The 'npm' GitHub environment in this repo (Settings -> Environments)
-# controls who can deploy -- restrict to v*.*.* tags and require a
-# manual reviewer for added safety.
 
 on:
   push:
@@ -29,7 +21,7 @@ jobs:
       url: https://www.npmjs.com/package/bulkurlchecker
     permissions:
       contents: read
-      id-token: write   # OIDC for npm trusted publishing + sigstore provenance
+      id-token: write   # sigstore provenance attestation
 
     steps:
       - uses: actions/checkout@v4
@@ -46,5 +38,7 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Publish (trusted publishing + provenance)
+      - name: Publish (with provenance)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --provenance --access public
