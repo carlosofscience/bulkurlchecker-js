@@ -8,6 +8,21 @@ releases; they'll always be noted under "Changed" or "Removed."
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-28
+
+### Added
+- `cursor` option on `client.getResults()` for stable id-asc pagination.
+- New `client.getResultsPage()` returns `{ results, nextCursor }` for
+  callers that want explicit cursor control.
+- `client.iterResults()` now uses cursor pagination under the hood for
+  stable iteration even if results are still landing while you read.
+  Public API unchanged.
+
+### Changed
+- `iterResults()` request sequence: pages 2+ now send `cursor=` instead
+  of `offset=`. Behavior is identical for normal callers; only matters
+  if you mock the transport in tests.
+
 ## [0.2.0] - 2026-05-28
 
 ### Added
