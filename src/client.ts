@@ -55,6 +55,19 @@ export interface CheckUrlsOptions {
   waitSeconds?: number;
   /** Seconds between server-side status polls. 0.5-10, default 2. */
   pollInterval?: number;
+  /** Optional Idempotency-Key. Pass a UUIDv4 (or any unique string) to
+   *  make retries safe: same key + same body within 24h returns the
+   *  original response. Same key + different body returns 409 (raised
+   *  as ValidationError). */
+  idempotencyKey?: string;
+}
+
+export interface SubmitOptions {
+  /** Optional Idempotency-Key. Pass a UUIDv4 (or any unique string) to
+   *  make retries safe: same key + same body within 24h returns the
+   *  original JobSummary. Same key + different body returns 409
+   *  (raised as ValidationError). */
+  idempotencyKey?: string;
 }
 
 export interface GetResultsOptions {
@@ -126,20 +139,33 @@ export class Client {
     const params = new URLSearchParams();
     params.set("wait_seconds", String(options.waitSeconds ?? 60));
     params.set("poll_interval", String(options.pollInterval ?? 2));
+    const extraHeaders = options.idempotencyKey
+      ? { "Idempotency-Key": options.idempotencyKey }
+      : undefined;
     const body = await this.request<unknown>(
       "POST",
       `/api/v2/jobs/wait?${params.toString()}`,
-      { urls: urlList }
+      { urls: urlList },
+      extraHeaders
     );
     return parseCheckResults(body as Parameters<typeof parseCheckResults>[0]);
   }
 
   /** Submit a job and return immediately with its id. */
-  async submit(urls: Iterable<string>): Promise<JobSummary> {
+  async submit(
+    urls: Iterable<string>,
+    options: SubmitOptions = {}
+  ): Promise<JobSummary> {
     const urlList = this.validateUrls(urls);
-    const body = await this.request<unknown>("POST", "/api/v2/jobs", {
-      urls: urlList,
-    });
+    const extraHeaders = options.idempotencyKey
+      ? { "Idempotency-Key": options.idempotencyKey }
+      : undefined;
+    const body = await this.request<unknown>(
+      "POST",
+      "/api/v2/jobs",
+      { urls: urlList },
+      extraHeaders
+    );
     return parseJobSummary(body as Parameters<typeof parseJobSummary>[0]);
   }
 
@@ -229,7 +255,8 @@ export class Client {
   private async request<T>(
     method: string,
     path: string,
-    body?: unknown
+    body?: unknown,
+    extraHeaders?: Record<string, string>
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
     const controller = new AbortController();
@@ -244,6 +271,7 @@ export class Client {
           "User-Agent": this.userAgent,
           Accept: "application/json",
           ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+          ...(extraHeaders ?? {}),
         },
         body: body !== undefined ? JSON.stringify(body) : undefined,
       });
