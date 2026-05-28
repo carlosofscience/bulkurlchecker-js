@@ -97,6 +97,46 @@ const sameJob = await client.submit(urls, { idempotencyKey: key });
 
 Same `idempotencyKey` + different `urls` returns `409 Conflict` (raised as `ValidationError`) so client bugs that reuse a key against a new payload are caught loudly instead of silently mapping to the wrong cached response.
 
+## Receiving webhooks
+
+When a job finishes, we POST to your registered endpoint with a signed payload. Verify the signature before trusting the body — anyone who knows your endpoint URL can otherwise send fake events.
+
+```ts
+import express from "express";
+import { verifySignature, InvalidSignatureError } from "bulkurlchecker";
+
+const app = express();
+const SECRET = process.env.MY_WEBHOOK_SECRET!;
+
+// body-parser must use `raw` so the original bytes survive for signature verification.
+app.post(
+  "/webhook/bulkurlchecker",
+  express.raw({ type: "application/json" }),
+  (req, res) => {
+    try {
+      verifySignature(
+        req.body, // Buffer with the raw bytes
+        req.header("Bulkurlchecker-Signature") ?? "",
+        SECRET,
+      );
+    } catch (err) {
+      if (err instanceof InvalidSignatureError) return res.status(401).end();
+      throw err;
+    }
+    const event = JSON.parse(req.body.toString("utf-8"));
+    if (event.type === "job.completed") {
+      const { job_id } = event.data;
+      // ... fetch results, update your DB, ping Slack, etc ...
+    }
+    res.status(200).end();
+  }
+);
+```
+
+Register endpoints + get secrets at https://app.bulkurlchecker.com/dashboard/webhooks (or via `POST /api/v2/webhooks/endpoints`).
+
+`verifySignature()` enforces a 5-minute timestamp tolerance by default to defeat replays. Tune via `toleranceSeconds:`.
+
 ## Error handling
 
 All errors derive from `BulkUrlCheckerError`. Catch specific subclasses when you want to branch on the failure mode:
