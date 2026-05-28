@@ -8,6 +8,18 @@ releases; they'll always be noted under "Changed" or "Removed."
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-05-28
+
+### Fixed
+- CI publish workflow now upgrades npm to the latest version before
+  publishing. Node 20 LTS ships with npm 10.x, which doesn't fully
+  support npm Trusted Publishers (OIDC). 11.5.1+ is required. Without
+  this, `npm publish` falls back to token auth and returns
+  `404 Not Found` on the PUT step because there's no token in the env.
+
+No code changes vs 0.4.0; this is a re-publish of identical source
+that the broken workflow couldn't push.
+
 ## [0.4.0] - 2026-05-28
 
 ### Added
