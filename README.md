@@ -77,6 +77,26 @@ for await (const batch of client.iterResults(job.jobId, { pageSize: 1000 })) {
 }
 ```
 
+## Safe retries with `idempotencyKey`
+
+Pass an idempotency key on `submit()` or `checkUrls()` to make retries safe under network failures. The server caches the response for 24 hours; a retry with the same key + same body returns the original result without creating a duplicate job.
+
+```ts
+import { randomUUID } from "node:crypto";
+
+const key = randomUUID(); // generate once per logical request
+
+// First call: creates a new job.
+const job = await client.submit(urls, { idempotencyKey: key });
+
+// Network blip, no clean response received? Just retry with the same
+// key — you'll get the SAME job summary back, no duplicate submission.
+const sameJob = await client.submit(urls, { idempotencyKey: key });
+// job.jobId === sameJob.jobId
+```
+
+Same `idempotencyKey` + different `urls` returns `409 Conflict` (raised as `ValidationError`) so client bugs that reuse a key against a new payload are caught loudly instead of silently mapping to the wrong cached response.
+
 ## Error handling
 
 All errors derive from `BulkUrlCheckerError`. Catch specific subclasses when you want to branch on the failure mode:
