@@ -117,12 +117,12 @@ describe("submit + iterResults", () => {
     expect(job.totalUrls).toBe(5);
   });
 
-  it("iterResults paginates and stops on short page", async () => {
+  it("iterResults paginates via cursor and stops on next_cursor=null", async () => {
     const first = Array.from({ length: 1000 }, (_, i) => ({ url: `https://e/${i}`, status_code: 200 }));
     const second = Array.from({ length: 200 }, (_, i) => ({ url: `https://e/${i + 1000}`, status_code: 200 }));
     const mock = mockFetch([
-      { status: 200, body: { items: first } },
-      { status: 200, body: { items: second } },
+      { status: 200, body: { items: first, next_cursor: "cursor-abc" } },
+      { status: 200, body: { items: second, next_cursor: null } },
     ]);
     const c = newClient(mock);
     const batches: number[] = [];
