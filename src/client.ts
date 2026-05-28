@@ -55,11 +55,35 @@ export interface CheckUrlsOptions {
   waitSeconds?: number;
   /** Seconds between server-side status polls. 0.5-10, default 2. */
   pollInterval?: number;
+  /** Optional Idempotency-Key. Pass a UUIDv4 (or any unique string) to
+   *  make retries safe: same key + same body within 24h returns the
+   *  original response. Same key + different body returns 409 (raised
+   *  as ValidationError). */
+  idempotencyKey?: string;
+}
+
+export interface SubmitOptions {
+  /** Optional Idempotency-Key. Pass a UUIDv4 (or any unique string) to
+   *  make retries safe: same key + same body within 24h returns the
+   *  original JobSummary. Same key + different body returns 409
+   *  (raised as ValidationError). */
+  idempotencyKey?: string;
 }
 
 export interface GetResultsOptions {
   limit?: number;
   offset?: number;
+  /** Opaque pagination cursor from a previous response's `next_cursor`.
+   *  When set, `offset` is ignored and results come back in stable
+   *  id-asc order. Recommended for full exports. */
+  cursor?: string;
+}
+
+export interface GetResultsPage {
+  results: URLResult[];
+  /** Next-page cursor for cursor-based pagination. `null` means no
+   *  more pages. Always `null` when the request didn't use a cursor. */
+  nextCursor: string | null;
 }
 
 export interface IterResultsOptions {
@@ -126,20 +150,33 @@ export class Client {
     const params = new URLSearchParams();
     params.set("wait_seconds", String(options.waitSeconds ?? 60));
     params.set("poll_interval", String(options.pollInterval ?? 2));
+    const extraHeaders = options.idempotencyKey
+      ? { "Idempotency-Key": options.idempotencyKey }
+      : undefined;
     const body = await this.request<unknown>(
       "POST",
       `/api/v2/jobs/wait?${params.toString()}`,
-      { urls: urlList }
+      { urls: urlList },
+      extraHeaders
     );
     return parseCheckResults(body as Parameters<typeof parseCheckResults>[0]);
   }
 
   /** Submit a job and return immediately with its id. */
-  async submit(urls: Iterable<string>): Promise<JobSummary> {
+  async submit(
+    urls: Iterable<string>,
+    options: SubmitOptions = {}
+  ): Promise<JobSummary> {
     const urlList = this.validateUrls(urls);
-    const body = await this.request<unknown>("POST", "/api/v2/jobs", {
-      urls: urlList,
-    });
+    const extraHeaders = options.idempotencyKey
+      ? { "Idempotency-Key": options.idempotencyKey }
+      : undefined;
+    const body = await this.request<unknown>(
+      "POST",
+      "/api/v2/jobs",
+      { urls: urlList },
+      extraHeaders
+    );
     return parseJobSummary(body as Parameters<typeof parseJobSummary>[0]);
   }
 
@@ -149,14 +186,22 @@ export class Client {
     return parseJobSummary(body as Parameters<typeof parseJobSummary>[0]);
   }
 
-  /** Fetch one page of results. See iterResults() for streaming. */
+  /** Fetch one page of results. See iterResults() for streaming.
+   *
+   *  Pass `cursor` (from a previous response's `nextCursor`) to switch
+   *  to stable id-asc pagination. Returns just the results array; use
+   *  `getResultsPage()` if you also need the next cursor back. */
   async getResults(
     jobId: string,
     options: GetResultsOptions = {}
   ): Promise<URLResult[]> {
     const params = new URLSearchParams();
     params.set("limit", String(options.limit ?? 1000));
-    params.set("offset", String(options.offset ?? 0));
+    if (options.cursor !== undefined) {
+      params.set("cursor", options.cursor);
+    } else {
+      params.set("offset", String(options.offset ?? 0));
+    }
     const body = (await this.request<{ items?: unknown[]; results?: unknown[] }>(
       "GET",
       `/api/v2/jobs/${encodeURIComponent(jobId)}/results?${params.toString()}`
@@ -165,19 +210,63 @@ export class Client {
     return items.map(parseURLResult);
   }
 
-  /** Stream all results for a job in pages. */
+  /** Cursor-paginated fetch that also returns the next cursor.
+   *
+   *  Pair with a while-loop:
+   *
+   *      let cursor: string | undefined = undefined;
+   *      while (true) {
+   *        const { results, nextCursor } = await client.getResultsPage(jobId, { cursor });
+   *        process(results);
+   *        if (nextCursor === null) break;
+   *        cursor = nextCursor;
+   *      }
+   *
+   *  For most callers `iterResults()` is more ergonomic. */
+  async getResultsPage(
+    jobId: string,
+    options: { limit?: number; cursor?: string } = {}
+  ): Promise<GetResultsPage> {
+    const params = new URLSearchParams();
+    params.set("limit", String(options.limit ?? 1000));
+    if (options.cursor !== undefined) {
+      params.set("cursor", options.cursor);
+    }
+    const body = (await this.request<{
+      items?: unknown[];
+      results?: unknown[];
+      next_cursor?: string | null;
+    }>(
+      "GET",
+      `/api/v2/jobs/${encodeURIComponent(jobId)}/results?${params.toString()}`
+    ));
+    const items = (body.items ?? body.results ?? []) as Parameters<typeof parseURLResult>[0][];
+    return {
+      results: items.map(parseURLResult),
+      nextCursor: body.next_cursor ?? null,
+    };
+  }
+
+  /** Stream all results for a job in pages.
+   *
+   *  Uses cursor pagination under the hood for stable iteration even
+   *  if results are still landing while you read. Stops when the
+   *  server returns `next_cursor: null`. */
   async *iterResults(
     jobId: string,
     options: IterResultsOptions = {}
   ): AsyncGenerator<URLResult[], void, void> {
     const pageSize = options.pageSize ?? 1000;
-    let offset = 0;
+    let cursor: string | undefined = undefined;
     while (true) {
-      const batch = await this.getResults(jobId, { limit: pageSize, offset });
-      if (batch.length === 0) return;
-      yield batch;
-      if (batch.length < pageSize) return;
-      offset += pageSize;
+      const { results, nextCursor } = await this.getResultsPage(jobId, {
+        limit: pageSize,
+        cursor,
+      });
+      if (results.length === 0) return;
+      yield results;
+      if (nextCursor === null) return;
+      cursor = nextCursor;
     }
   }
 
@@ -229,7 +318,8 @@ export class Client {
   private async request<T>(
     method: string,
     path: string,
-    body?: unknown
+    body?: unknown,
+    extraHeaders?: Record<string, string>
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
     const controller = new AbortController();
@@ -244,6 +334,7 @@ export class Client {
           "User-Agent": this.userAgent,
           Accept: "application/json",
           ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+          ...(extraHeaders ?? {}),
         },
         body: body !== undefined ? JSON.stringify(body) : undefined,
       });

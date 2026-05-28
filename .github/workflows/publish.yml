@@ -39,6 +39,13 @@ jobs:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
 
+      # Node 20 LTS ships with npm 10.x; npm Trusted Publishers OIDC
+      # requires npm 11.5.1+. Without this upgrade, `npm publish` falls
+      # back to token auth and returns 404 "not in this registry" on
+      # PUT because there's no token in the env to fall back to.
+      - name: Upgrade npm for Trusted Publisher OIDC support
+        run: npm install -g npm@latest
+
       - name: Install
         run: npm install
 

@@ -41,4 +41,10 @@ export type {
   JobSummary,
   URLResult,
 } from "./types.js";
+export {
+  InvalidSignatureError,
+  verifySignature,
+  DEFAULT_TOLERANCE_SECONDS,
+} from "./webhooks.js";
+export type { VerifySignatureOptions } from "./webhooks.js";
 export { VERSION } from "./version.js";
