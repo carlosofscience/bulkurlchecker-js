@@ -147,17 +147,24 @@ export class Client {
     options: CheckUrlsOptions = {}
   ): Promise<CheckResults> {
     const urlList = this.validateUrls(urls);
+    const waitSeconds = options.waitSeconds ?? 60;
     const params = new URLSearchParams();
-    params.set("wait_seconds", String(options.waitSeconds ?? 60));
+    params.set("wait_seconds", String(waitSeconds));
     params.set("poll_interval", String(options.pollInterval ?? 2));
     const extraHeaders = options.idempotencyKey
       ? { "Idempotency-Key": options.idempotencyKey }
       : undefined;
+    // The HTTP timeout must be longer than the server-side wait or
+    // the client gives up while the server is still legitimately
+    // processing. Extend per-call to waitSeconds + 10s buffer; caller's
+    // explicit `Client({ timeoutMs })` wins if higher.
+    const timeoutOverrideMs = Math.max(this.timeoutMs, waitSeconds * 1000 + 10_000);
     const body = await this.request<unknown>(
       "POST",
       `/api/v2/jobs/wait?${params.toString()}`,
       { urls: urlList },
-      extraHeaders
+      extraHeaders,
+      timeoutOverrideMs
     );
     return parseCheckResults(body as Parameters<typeof parseCheckResults>[0]);
   }
@@ -257,7 +264,13 @@ export class Client {
     options: IterResultsOptions = {}
   ): AsyncGenerator<URLResult[], void, void> {
     const pageSize = options.pageSize ?? 1000;
-    let cursor: string | undefined = undefined;
+    // Start with empty-string cursor as the "begin cursor stream"
+    // sentinel. Server treats this as "engage cursor mode without an
+    // anchor" so the first response carries a real next_cursor when
+    // more pages exist. Sending undefined here would land us in offset
+    // mode and the iterator would terminate after one page (bug fixed
+    // in 0.4.2).
+    let cursor: string | undefined = "";
     while (true) {
       const { results, nextCursor } = await this.getResultsPage(jobId, {
         limit: pageSize,
@@ -319,11 +332,13 @@ export class Client {
     method: string,
     path: string,
     body?: unknown,
-    extraHeaders?: Record<string, string>
+    extraHeaders?: Record<string, string>,
+    timeoutOverrideMs?: number
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const effectiveTimeoutMs = timeoutOverrideMs ?? this.timeoutMs;
+    const timer = setTimeout(() => controller.abort(), effectiveTimeoutMs);
     let response: Response;
     try {
       response = await this.fetchImpl(url, {
@@ -341,7 +356,7 @@ export class Client {
     } catch (err) {
       const aborted = (err as { name?: string }).name === "AbortError";
       if (aborted) {
-        throw new TimeoutError(`HTTP ${method} ${path} timed out after ${this.timeoutMs}ms`);
+        throw new TimeoutError(`HTTP ${method} ${path} timed out after ${effectiveTimeoutMs}ms`);
       }
       throw new BulkUrlCheckerError(
         `Network error calling ${method} ${path}: ${(err as Error).message}`
@@ -412,7 +427,11 @@ export class Client {
       });
     }
     if (response.status === 402) throw new QuotaError(message, meta);
-    if (response.status === 400 || response.status === 422) {
+    if (response.status === 400 || response.status === 422 || response.status === 409) {
+      // 409 covers Idempotency-Key reuse with a different body. The
+      // README + blog promise ValidationError; the server's
+      // error.code ("idempotency_key_mismatch") is preserved on
+      // meta.code so callers can branch on the specific cause.
       throw new ValidationError(message, meta);
     }
     if (response.status >= 500) throw new ServerError(message, meta);

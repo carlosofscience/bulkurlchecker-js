@@ -1,6 +1,6 @@
 {
   "name": "bulkurlchecker",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "JavaScript/TypeScript client for the Bulk URL Checker API. Skip the proxy-rotation + rate-limiter + soft-404-detector you would otherwise have to build.",
   "type": "module",
   "main": "./dist/index.cjs",

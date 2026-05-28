@@ -20,9 +20,9 @@ const API = "https://api.bulkurlchecker.com";
 
 function mockFetch(responses: Array<{ status: number; body: unknown; headers?: Record<string, string> }>) {
   let i = 0;
-  return vi.fn(async () => {
+  return vi.fn(async (url: string | URL, _init?: RequestInit) => {
     const r = responses[i++];
-    if (!r) throw new Error("No more mock responses queued");
+    if (!r) throw new Error(`No more mock responses queued (called with ${String(url)})`);
     return new Response(JSON.stringify(r.body), {
       status: r.status,
       headers: { "Content-Type": "application/json", ...(r.headers ?? {}) },
@@ -130,6 +130,14 @@ describe("submit + iterResults", () => {
       batches.push(batch.length);
     }
     expect(batches).toEqual([1000, 200]);
+
+    // Regression for the 0.4.2 cursor-bootstrap fix: first request
+    // must send cursor= (empty) so the server engages cursor mode and
+    // emits next_cursor. Without it, iterResults stops after page 1.
+    const firstUrl = String(mock.mock.calls[0]?.[0] ?? "");
+    expect(firstUrl).toContain("cursor=");
+    const secondUrl = String(mock.mock.calls[1]?.[0] ?? "");
+    expect(secondUrl).toContain("cursor=cursor-abc");
   });
 });
 
